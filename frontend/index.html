@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>vscribe — link to text</title>
+<meta name="theme-color" content="#0C0E14">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #F5F6F8;
+    --surface: #FFFFFF;
+    --surface-2: #ECEEF3;
+    --border: #E1E3EA;
+    --text: #14161F;
+    --text-muted: #6B7080;
+    --accent: #6E5BFF;
+    --accent-ink: #FFFFFF;
+    --accent-2: #17A085;
+    --warn: #B8720F;
+    --danger: #D3363C;
+    --radius: 10px;
+    --shadow: 0 1px 2px rgba(20,22,31,0.04), 0 8px 24px rgba(20,22,31,0.06);
+    color-scheme: light;
+  }
+  [data-theme="dark"] {
+    --bg: #0C0E14;
+    --surface: #131722;
+    --surface-2: #1A1E2A;
+    --border: #262B3A;
+    --text: #E7E9EE;
+    --text-muted: #8A8FA3;
+    --accent: #8677FF;
+    --accent-ink: #0C0E14;
+    --accent-2: #22D3B6;
+    --warn: #FFB454;
+    --danger: #FF6B6B;
+    --shadow: 0 1px 2px rgba(0,0,0,0.2), 0 12px 32px rgba(0,0,0,0.35);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', system-ui, sans-serif;
+    min-height: 100vh;
+    transition: background .2s ease, color .2s ease;
+  }
+  h1, h2 { font-family: 'Space Grotesk', 'Inter', sans-serif; margin: 0; }
+  code, .mono { font-family: 'JetBrains Mono', monospace; }
+  button, input, select { font-family: inherit; }
+  a { color: var(--accent); }
+  .hidden { display: none !important; }
+
+  /* ── Waveform signature mark ── */
+  .wave-mark {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    height: 20px;
+  }
+  .wave-mark i {
+    display: block;
+    width: 3px;
+    border-radius: 2px;
+    background: var(--accent);
+    height: 40%;
+  }
+  .wave-mark i:nth-child(1) { height: 55%; }
+  .wave-mark i:nth-child(2) { height: 90%; }
+  .wave-mark i:nth-child(3) { height: 35%; }
+  .wave-mark i:nth-child(4) { height: 70%; }
+  .wave-mark i:nth-child(5) { height: 50%; }
+  .wave-mark.large { height: 40px; gap: 5px; }
+  .wave-mark.large i { width: 5px; }
+  .wave-mark.small { height: 14px; gap: 2px; }
+  .wave-mark.small i { width: 2px; }
+
+  @keyframes wavePulse {
+    0%, 100% { transform: scaleY(0.4); }
+    50% { transform: scaleY(1); }
+  }
+  .wave-mark.processing i {
+    animation: wavePulse 0.9s ease-in-out infinite;
+    background: var(--warn);
+  }
+  .wave-mark.processing i:nth-child(1) { animation-delay: 0s; }
+  .wave-mark.processing i:nth-child(2) { animation-delay: .12s; }
+  .wave-mark.processing i:nth-child(3) { animation-delay: .24s; }
+  .wave-mark.processing i:nth-child(4) { animation-delay: .36s; }
+  .wave-mark.processing i:nth-child(5) { animation-delay: .48s; }
+
+  .wave-mark.idle i { animation: wavePulse 3.2s ease-in-out infinite; opacity: .55; }
+  .wave-mark.idle i:nth-child(1) { animation-delay: 0s; }
+  .wave-mark.idle i:nth-child(2) { animation-delay: .3s; }
+  .wave-mark.idle i:nth-child(3) { animation-delay: .6s; }
+  .wave-mark.idle i:nth-child(4) { animation-delay: .9s; }
+  .wave-mark.idle i:nth-child(5) { animation-delay: 1.2s; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .wave-mark i { animation: none !important; }
+  }
+
+  /* ── Top bar ── */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .wordmark { font-weight: 700; font-size: 18px; letter-spacing: -0.02em; }
+  .topbar-right { display: flex; align-items: center; gap: 12px; }
+  .user-chip { font-size: 13px; color: var(--text-muted); }
+  .icon-btn {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 8px;
+    width: 34px; height: 34px;
+    display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    font-size: 15px;
+  }
+  .icon-btn:hover { border-color: var(--accent); }
+
+  /* ── Buttons ── */
+  .btn-primary, .btn-secondary, .link-btn {
+    cursor: pointer;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 14px;
+    border: 1px solid transparent;
+    padding: 11px 16px;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: var(--accent-ink);
+    width: 100%;
+  }
+  .btn-primary:hover { filter: brightness(1.06); }
+  .btn-primary:disabled { opacity: .55; cursor: not-allowed; }
+  .btn-secondary {
+    background: transparent;
+    border-color: var(--border);
+    color: var(--text);
+  }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-secondary.small { padding: 7px 12px; font-size: 13px; }
+  .link-btn {
+    background: none; border: none; color: var(--text-muted);
+    font-size: 13px; padding: 6px 0; text-decoration: underline;
+  }
+
+  main { max-width: 980px; margin: 0 auto; padding: 32px 20px 80px; }
+
+  /* ── Auth view ── */
+  .auth-view { display: flex; flex-direction: column; align-items: center; padding-top: 40px; }
+  .auth-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 32px;
+    width: 100%;
+    max-width: 400px;
+    text-align: center;
+  }
+  .auth-card h1 { font-size: 22px; margin-top: 16px; }
+  .auth-card .sub { color: var(--text-muted); font-size: 14px; margin: 8px 0 24px; }
+  .tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+  .tab {
+    flex: 1; background: none; border: none; padding: 10px 0;
+    color: var(--text-muted); font-weight: 600; font-size: 14px;
+    cursor: pointer; border-bottom: 2px solid transparent;
+  }
+  .tab.active { color: var(--accent); border-color: var(--accent); }
+  .auth-form { display: flex; flex-direction: column; gap: 14px; text-align: left; }
+  .auth-form label { font-size: 13px; color: var(--text-muted); display: flex; flex-direction: column; gap: 6px; }
+  .auth-form input {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+  .auth-form input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .hint { font-size: 12px; color: var(--text-muted); margin: 0; }
+  .error-text { color: var(--danger); font-size: 13px; margin-top: 14px; }
+  .success-text { color: var(--accent-2); font-size: 13px; margin-top: 14px; }
+
+  .api-base-settings { margin-top: 18px; font-size: 12px; color: var(--text-muted); width: 100%; max-width: 400px; }
+  .api-base-settings summary { cursor: pointer; }
+  .api-base-settings-row { display: flex; gap: 8px; margin-top: 8px; }
+  .api-base-settings input {
+    flex: 1; background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 7px 10px; font-size: 12px;
+  }
+
+  /* ── Dashboard ── */
+  .grid { display: grid; grid-template-columns: 260px 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: var(--shadow);
+  }
+  .card h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); margin-bottom: 14px; }
+
+  .plan-badge {
+    display: inline-block;
+    background: var(--surface-2);
+    color: var(--accent);
+    border: 1px solid var(--border);
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    padding: 3px 8px; border-radius: 20px; margin-bottom: 14px;
+  }
+  .key-row {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px;
+  }
+  .key-row code { flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .key-meta { font-size: 12px; color: var(--text-muted); margin: 10px 0 14px; line-height: 1.5; }
+  .icon-btn.tiny { width: 26px; height: 26px; font-size: 12px; }
+
+  .transcribe-panel form { display: flex; flex-direction: column; gap: 14px; }
+  .transcribe-panel input[type="url"] {
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 12px 14px; font-size: 14px;
+  }
+  .format-toggle { display: flex; gap: 18px; font-size: 13px; color: var(--text-muted); }
+  .format-toggle label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+
+  .job-status { display: flex; align-items: center; gap: 10px; margin-top: 16px; font-size: 13px; color: var(--text-muted); }
+
+  .result-panel { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 18px; }
+  .result-meta { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
+  .result-text {
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px; font-size: 14px; line-height: 1.6; max-height: 320px; overflow-y: auto;
+    white-space: pre-wrap;
+  }
+  .result-segments {
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px; max-height: 320px; overflow-y: auto;
+  }
+  .segment-row { display: flex; gap: 10px; padding: 8px 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .segment-row:last-child { border-bottom: none; }
+  .segment-time { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); flex-shrink: 0; padding-top: 1px; }
+  .result-actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+
+  .history { margin-top: 20px; }
+  #historyList { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .history-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+    cursor: pointer; font-size: 13px;
+  }
+  .history-item:hover { border-color: var(--accent); }
+  .history-item .h-url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); flex: 1; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .status-dot.completed { background: var(--accent-2); }
+  .status-dot.queued, .status-dot.waiting, .status-dot.active { background: var(--warn); }
+  .status-dot.failed { background: var(--danger); }
+  .empty-note { font-size: 13px; color: var(--text-muted); }
+
+  /* ── Toast ── */
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--text); color: var(--bg);
+    padding: 10px 18px; border-radius: 8px; font-size: 13px;
+    box-shadow: var(--shadow); z-index: 50;
+  }
+  .toast.error { background: var(--danger); color: #fff; }
+</style>
+</head>
+<body data-theme="dark">
+
+<header class="topbar">
+  <div class="brand">
+    <span class="wave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+    <span class="wordmark">vscribe</span>
+  </div>
+  <div class="topbar-right">
+    <span id="userChip" class="user-chip hidden"></span>
+    <button id="themeToggle" class="icon-btn" aria-label="Toggle theme" title="Toggle theme">◐</button>
+    <button id="logoutBtn" class="btn-secondary small hidden">Log out</button>
+  </div>
+</header>
+
+<main>
+  <!-- AUTH VIEW -->
+  <section id="authView" class="auth-view">
+    <div class="auth-card">
+      <span class="wave-mark large idle" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+      <h1>Turn any link into text</h1>
+      <p class="sub">Paste a video URL, get a transcript.</p>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="login">Log in</button>
+        <button class="tab" data-tab="register">Create account</button>
+      </div>
+
+      <form id="loginForm" class="auth-form">
+        <label>Email <input type="email" id="loginEmail" required autocomplete="email"></label>
+        <label>Password <input type="password" id="loginPassword" required autocomplete="current-password"></label>
+        <button type="submit" class="btn-primary">Log in</button>
+        <button type="button" id="forgotBtn" class="link-btn">Forgot password?</button>
+      </form>
+
+      <form id="registerForm" class="auth-form hidden">
+        <label>Email <input type="email" id="registerEmail" required autocomplete="email"></label>
+        <label>Password <input type="password" id="registerPassword" required minlength="8" autocomplete="new-password"></label>
+        <p class="hint">At least 8 characters. We'll email a verification code.</p>
+        <button type="submit" class="btn-primary">Create account</button>
+      </form>
+
+      <form id="otpForm" class="auth-form hidden">
+        <p class="hint">Code sent to <strong id="otpEmail"></strong></p>
+        <label>Verification code <input type="text" id="otpCode" inputmode="numeric" maxlength="6" required></label>
+        <button type="submit" class="btn-primary">Verify</button>
+      </form>
+
+      <form id="forgotForm" class="auth-form hidden">
+        <label>Email <input type="email" id="forgotEmail" required></label>
+        <button type="submit" class="btn-primary">Send reset code</button>
+        <button type="button" class="link-btn" data-tab="login">Back to log in</button>
+      </form>
+
+      <form id="resetForm" class="auth-form hidden">
+        <p class="hint">Code sent to <strong id="resetEmail"></strong></p>
+        <label>Verification code <input type="text" id="resetCode" inputmode="numeric" maxlength="6" required></label>
+        <label>New password <input type="password" id="resetPassword" required minlength="8"></label>
+        <button type="submit" class="btn-primary">Reset password</button>
+      </form>
+
+      <p id="authError" class="error-text hidden"></p>
+      <p id="authSuccess" class="success-text hidden"></p>
+    </div>
+
+    <details class="api-base-settings">
+      <summary>API endpoint</summary>
+      <div class="api-base-settings-row">
+        <input id="apiBaseInput" type="url" placeholder="http://localhost:3001/api/v1">
+        <button id="saveApiBase" class="btn-secondary small">Save</button>
+      </div>
+    </details>
+  </section>
+
+  <!-- DASHBOARD VIEW -->
+  <section id="dashView" class="hidden">
+    <div class="grid">
+      <aside class="key-panel card">
+        <h2>API key</h2>
+        <span class="plan-badge" id="planBadge">free</span>
+        <div class="key-row">
+          <code id="keyValue" class="mono">••••••••••••••••</code>
+          <button id="revealKey" class="icon-btn tiny" title="Show key">👁</button>
+          <button id="copyKey" class="icon-btn tiny" title="Copy key">⧉</button>
+        </div>
+        <p class="key-meta" id="keyMeta"></p>
+        <button id="rotateKey" class="btn-secondary small">Rotate key</button>
+      </aside>
+
+      <div class="transcribe-panel card">
+        <h2>New transcription</h2>
+        <form id="transcribeForm">
+          <input type="url" id="urlInput" placeholder="Paste a video link…" required>
+          <div class="format-toggle">
+            <label><input type="radio" name="format" value="word_by_word" checked> Text only</label>
+            <label><input type="radio" name="format" value="timeline"> Timed (SRT/VTT)</label>
+          </div>
+          <button type="submit" class="btn-primary" id="submitBtn">Transcribe</button>
+        </form>
+
+        <div id="jobStatus" class="job-status hidden">
+          <span class="wave-mark small processing" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+          <span id="statusText">Queued…</span>
+        </div>
+
+        <p id="jobError" class="error-text hidden"></p>
+
+        <div id="resultPanel" class="result-panel hidden">
+          <div class="result-meta" id="resultMeta"></div>
+          <div id="resultText" class="result-text hidden"></div>
+          <div id="resultSegments" class="result-segments hidden"></div>
+          <div class="result-actions">
+            <button id="copyResult" class="btn-secondary small">Copy text</button>
+            <button id="downloadTxt" class="btn-secondary small hidden">Download .txt</button>
+            <button id="downloadSrt" class="btn-secondary small hidden">Download .srt</button>
+            <button id="downloadVtt" class="btn-secondary small hidden">Download .vtt</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="history card">
+      <h2>Recent</h2>
+      <ul id="historyList"></ul>
+      <p id="historyEmpty" class="empty-note">Nothing transcribed yet.</p>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ── Config ── */
+  const DEFAULT_API_BASE = 'http://localhost:3001/api/v1';
+  const LS = {
+    theme: 'vscribe_theme',
+    apiBase: 'vscribe_api_base',
+    session: 'vscribe_session',
+    history: 'vscribe_history_'
+  };
+
+  const state = {
+    apiBase: localStorage.getItem(LS.apiBase) || DEFAULT_API_BASE,
+    session: JSON.parse(localStorage.getItem(LS.session) || 'null'), // {email, apiKey, plan, label, lastUsed, createdAt}
+    pollTimer: null,
+    keyRevealed: false
+  };
+
+  /* ── Elements ── */
+  const $ = (id) => document.getElementById(id);
+  const authView = $('authView');
+  const dashView = $('dashView');
+  const themeToggle = $('themeToggle');
+  const userChip = $('userChip');
+  const logoutBtn = $('logoutBtn');
+  const toast = $('toast');
+
+  /* ── Toast ── */
+  let toastTimer;
+  function showToast(msg, isError = false) {
+    toast.textContent = msg;
+    toast.classList.toggle('error', isError);
+    toast.classList.remove('hidden');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.add('hidden'), 3200);
+  }
+
+  /* ── Theme ── */
+  function applyTheme(t) {
+    document.body.setAttribute('data-theme', t);
+    themeToggle.textContent = t === 'dark' ? '◐' : '◑';
+    localStorage.setItem(LS.theme, t);
+  }
+  const savedTheme = localStorage.getItem(LS.theme) ||
+    (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  applyTheme(savedTheme);
+  themeToggle.addEventListener('click', () => {
+    applyTheme(document.body.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+
+  /* ── API base settings ── */
+  $('apiBaseInput').value = state.apiBase;
+  $('saveApiBase').addEventListener('click', () => {
+    const v = $('apiBaseInput').value.trim().replace(/\/$/, '');
+    if (!v) return;
+    state.apiBase = v;
+    localStorage.setItem(LS.apiBase, v);
+    showToast('API endpoint saved');
+  });
+
+  /* ── API helper ── */
+  async function api(path, { method = 'GET', body, auth = false } = {}) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (auth) {
+      if (!state.session?.apiKey) throw new Error('Not authenticated');
+      headers['X-API-Key'] = state.session.apiKey;
+    }
+    const res = await fetch(state.apiBase + path, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined
+    });
+    let data = {};
+    try { data = await res.json(); } catch (_) {}
+    if (!res.ok) throw new Error(data.error || data.message || `Request failed (${res.status})`);
+    return data;
+  }
+
+  async function apiFile(path) {
+    const res = await fetch(state.apiBase + path, { headers: { 'X-API-Key': state.session.apiKey } });
+    if (!res.ok) throw new Error('Download failed');
+    return res.blob();
+  }
+
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  /* ── View switching ── */
+  function showAuthed() {
+    authView.classList.add('hidden');
+    dashView.classList.remove('hidden');
+    userChip.textContent = state.session.email;
+    userChip.classList.remove('hidden');
+    logoutBtn.classList.remove('hidden');
+    renderKeyPanel();
+    renderHistory();
+  }
+  function showGuest() {
+    dashView.classList.add('hidden');
+    authView.classList.remove('hidden');
+    userChip.classList.add('hidden');
+    logoutBtn.classList.add('hidden');
+  }
+  if (state.session?.apiKey) showAuthed(); else showGuest();
+
+  /* ── Auth tabs ── */
+  const forms = {
+    login: $('loginForm'), register: $('registerForm'),
+    otp: $('otpForm'), forgot: $('forgotForm'), reset: $('resetForm')
+  };
+  function setTab(name) {
+    Object.values(forms).forEach(f => f.classList.add('hidden'));
+    forms[name].classList.remove('hidden');
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+    $('authError').classList.add('hidden');
+    $('authSuccess').classList.add('hidden');
+  }
+  document.querySelectorAll('[data-tab]').forEach(el => {
+    el.addEventListener('click', () => setTab(el.dataset.tab));
+  });
+  $('forgotBtn').addEventListener('click', () => setTab('forgot'));
+
+  function authErr(msg) {
+    const e = $('authError'); e.textContent = msg; e.classList.remove('hidden');
+    $('authSuccess').classList.add('hidden');
+  }
+  function authOk(msg) {
+    const s = $('authSuccess'); s.textContent = msg; s.classList.remove('hidden');
+    $('authError').classList.add('hidden');
+  }
+
+  /* ── Auth flows ── */
+  forms.login.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const data = await api('/auth/login', {
+        method: 'POST',
+        body: { email: $('loginEmail').value.trim(), password: $('loginPassword').value }
+      });
+      const key = (data.api_keys && data.api_keys[0]) || null;
+      if (!key) throw new Error('No API key found on this account');
+      setSession({ email: data.user.email, plan: data.user.plan, apiKey: key.key, label: key.label, lastUsed: key.last_used, createdAt: key.created_at });
+      showAuthed();
+    } catch (err) { authErr(err.message); }
+  });
+
+  forms.register.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const email = $('registerEmail').value.trim();
+      await api('/auth/register', { method: 'POST', body: { email, password: $('registerPassword').value } });
+      $('otpEmail').textContent = email;
+      forms.register.dataset.pendingEmail = email;
+      setTab('otp');
+    } catch (err) { authErr(err.message); }
+  });
+
+  forms.otp.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const email = forms.register.dataset.pendingEmail;
+      const data = await api('/auth/verify', { method: 'POST', body: { email, otp: $('otpCode').value.trim() } });
+      setSession({ email, plan: data.plan, apiKey: data.api_key, label: 'Default', lastUsed: null, createdAt: new Date().toISOString() });
+      showAuthed();
+    } catch (err) { authErr(err.message); }
+  });
+
+  forms.forgot.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const email = $('forgotEmail').value.trim();
+      await api('/auth/reset-password', { method: 'POST', body: { email } });
+      $('resetEmail').textContent = email;
+      forms.forgot.dataset.pendingEmail = email;
+      setTab('reset');
+    } catch (err) { authErr(err.message); }
+  });
+
+  forms.reset.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const email = forms.forgot.dataset.pendingEmail;
+      await api('/auth/reset-password/confirm', {
+        method: 'POST',
+        body: { email, otp: $('resetCode').value.trim(), newPassword: $('resetPassword').value }
+      });
+      setTab('login');
+      authOk('Password updated. Log in with your new password.');
+    } catch (err) { authErr(err.message); }
+  });
+
+  function setSession(s) {
+    state.session = s;
+    localStorage.setItem(LS.session, JSON.stringify(s));
+  }
+
+  logoutBtn.addEventListener('click', () => {
+    state.session = null;
+    localStorage.removeItem(LS.session);
+    clearTimeout(state.pollTimer);
+    showGuest();
+    setTab('login');
+  });
+
+  /* ── Key panel ── */
+  function maskKey(key) {
+    if (!key) return '';
+    return state.keyRevealed ? key : key.slice(0, 8) + '••••••••••••••••••••' + key.slice(-4);
+  }
+  function renderKeyPanel() {
+    $('planBadge').textContent = state.session.plan || 'free';
+    $('keyValue').textContent = maskKey(state.session.apiKey);
+    const meta = [];
+    if (state.session.label) meta.push(state.session.label);
+    if (state.session.lastUsed) meta.push('last used ' + new Date(state.session.lastUsed).toLocaleDateString());
+    $('keyMeta').textContent = meta.join(' · ');
+  }
+  $('revealKey').addEventListener('click', () => {
+    state.keyRevealed = !state.keyRevealed;
+    renderKeyPanel();
+  });
+  $('copyKey').addEventListener('click', async () => {
+    await navigator.clipboard.writeText(state.session.apiKey);
+    showToast('Key copied');
+  });
+  $('rotateKey').addEventListener('click', async () => {
+    if (!confirm('Rotate your API key? The old key stops working immediately.')) return;
+    try {
+      const data = await api(`/auth/keys/${state.session.apiKey}/rotate`, { method: 'POST', auth: true });
+      state.session.apiKey = data.api_key;
+      state.keyRevealed = false;
+      setSession(state.session);
+      renderKeyPanel();
+      showToast('Key rotated');
+    } catch (err) { showToast(err.message, true); }
+  });
+
+  /* ── History (per-user, localStorage) ── */
+  function historyKey() { return LS.history + state.session.email; }
+  function getHistory() { return JSON.parse(localStorage.getItem(historyKey()) || '[]'); }
+  function saveHistory(list) { localStorage.setItem(historyKey(), JSON.stringify(list.slice(0, 20))); }
+  function addHistory(entry) {
+    const list = getHistory();
+    list.unshift(entry);
+    saveHistory(list);
+    renderHistory();
+  }
+  function updateHistoryStatus(jobId, status) {
+    const list = getHistory();
+    const item = list.find(j => j.id === jobId);
+    if (item) { item.status = status; saveHistory(list); renderHistory(); }
+  }
+  function renderHistory() {
+    const list = getHistory();
+    const ul = $('historyList');
+    ul.innerHTML = '';
+    $('historyEmpty').classList.toggle('hidden', list.length > 0);
+    list.forEach(item => {
+      const li = document.createElement('li');
+      li.className = 'history-item';
+      li.innerHTML = `<span class="status-dot ${item.status}"></span><span class="h-url">${escapeHtml(item.url)}</span><span class="mono" style="font-size:11px;color:var(--text-muted)">${item.format === 'timeline' ? 'timed' : 'text'}</span>`;
+      li.addEventListener('click', () => reopenJob(item));
+      ul.appendChild(li);
+    });
+  }
+  function reopenJob(item) {
+    resetResultUI();
+    $('urlInput').value = item.url;
+    if (item.status === 'completed') {
+      fetchAndRenderResult(item.id, item.format);
+    } else {
+      $('jobStatus').classList.remove('hidden');
+      $('statusText').textContent = 'Checking…';
+      pollJob(item.id, item.format);
+    }
+  }
+
+  /* ── Transcribe flow ── */
+  const transcribeForm = $('transcribeForm');
+  const submitBtn = $('submitBtn');
+  const jobStatus = $('jobStatus');
+  const statusText = $('statusText');
+  const jobError = $('jobError');
+
+  function resetResultUI() {
+    jobError.classList.add('hidden');
+    $('resultPanel').classList.add('hidden');
+    $('resultText').classList.add('hidden');
+    $('resultSegments').classList.add('hidden');
+    ['downloadTxt', 'downloadSrt', 'downloadVtt'].forEach(id => $(id).classList.add('hidden'));
+  }
+
+  transcribeForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const url = $('urlInput').value.trim();
+    const format = transcribeForm.querySelector('input[name="format"]:checked').value;
+    resetResultUI();
+    submitBtn.disabled = true;
+    jobStatus.classList.remove('hidden');
+    statusText.textContent = 'Queuing…';
+    try {
+      const data = await api('/transcribe', { method: 'POST', auth: true, body: { url, format } });
+      addHistory({ id: data.job_id, url, format, status: 'queued', createdAt: Date.now() });
+      pollJob(data.job_id, format);
+    } catch (err) {
+      submitBtn.disabled = false;
+      jobStatus.classList.add('hidden');
+      jobError.textContent = err.message;
+      jobError.classList.remove('hidden');
+    }
+  });
+
+  function pollJob(jobId, format) {
+    clearTimeout(state.pollTimer);
+    const tick = async () => {
+      try {
+        const data = await api(`/transcribe/${jobId}`, { auth: true });
+        const status = data.status;
+        statusText.textContent = status === 'active' ? 'Transcribing…' : status === 'waiting' || status === 'queued' ? 'Queued…' : status;
+        updateHistoryStatus(jobId, status);
+        if (status === 'completed') {
+          submitBtn.disabled = false;
+          jobStatus.classList.add('hidden');
+          renderResult(data.result, format, jobId);
+        } else if (status === 'failed') {
+          submitBtn.disabled = false;
+          jobStatus.classList.add('hidden');
+          jobError.textContent = data.error || 'Transcription failed';
+          jobError.classList.remove('hidden');
+        } else {
+          state.pollTimer = setTimeout(tick, 2500);
+        }
+      } catch (err) {
+        submitBtn.disabled = false;
+        jobStatus.classList.add('hidden');
+        jobError.textContent = err.message;
+        jobError.classList.remove('hidden');
+      }
+    };
+    tick();
+  }
+
+  async function fetchAndRenderResult(jobId, format) {
+    try {
+      const data = await api(`/transcribe/${jobId}/result`, { auth: true });
+      renderResult(data, format, jobId);
+    } catch (err) { showToast(err.message, true); }
+  }
+
+  function fmtTime(s) {
+    const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+    return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  }
+  function escapeHtml(str) {
+    const d = document.createElement('div'); d.textContent = str; return d.innerHTML;
+  }
+
+  let currentResult = null;
+  function renderResult(result, format, jobId) {
+    currentResult = { result, format, jobId };
+    const panel = $('resultPanel');
+    panel.classList.remove('hidden');
+    const meta = [];
+    if (result.title) meta.push(result.title);
+    if (result.language) meta.push(result.language.toUpperCase());
+    if (result.duration) meta.push(fmtTime(result.duration) + ' long');
+    $('resultMeta').textContent = meta.join(' · ');
+
+    if (format === 'word_by_word') {
+      const box = $('resultText');
+      box.textContent = result.full_text || '';
+      box.classList.remove('hidden');
+      $('downloadTxt').classList.remove('hidden');
+    } else {
+      const box = $('resultSegments');
+      box.innerHTML = (result.segments || []).map(s =>
+        `<div class="segment-row"><span class="segment-time">${fmtTime(s.start)}</span><span>${escapeHtml(s.text)}</span></div>`
+      ).join('');
+      box.classList.remove('hidden');
+      $('downloadSrt').classList.remove('hidden');
+      $('downloadVtt').classList.remove('hidden');
+    }
+  }
+
+  $('copyResult').addEventListener('click', async () => {
+    if (!currentResult) return;
+    const text = currentResult.format === 'word_by_word'
+      ? currentResult.result.full_text
+      : (currentResult.result.segments || []).map(s => s.text).join(' ');
+    await navigator.clipboard.writeText(text || '');
+    showToast('Copied to clipboard');
+  });
+
+  $('downloadTxt').addEventListener('click', () => {
+    if (!currentResult) return;
+    downloadBlob(new Blob([currentResult.result.full_text || ''], { type: 'text/plain' }), `transcript_${currentResult.jobId}.txt`);
+  });
+  $('downloadSrt').addEventListener('click', async () => {
+    if (!currentResult) return;
+    try { downloadBlob(await apiFile(`/transcribe/${currentResult.jobId}/srt`), `transcript_${currentResult.jobId}.srt`); }
+    catch (err) { showToast(err.message, true); }
+  });
+  $('downloadVtt').addEventListener('click', async () => {
+    if (!currentResult) return;
+    try { downloadBlob(await apiFile(`/transcribe/${currentResult.jobId}/vtt`), `transcript_${currentResult.jobId}.vtt`); }
+    catch (err) { showToast(err.message, true); }
+  });
+
+})();
+</script>
+</body>
+</html>

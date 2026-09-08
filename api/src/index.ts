@@ -12,9 +12,13 @@ dotenv.config();
 import './db/init';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.GATEWAY_PORT || 3001;
 
-app.use(helmet());
+// app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
+}));
+
 app.use(cors());
 app.use(express.json());
 
