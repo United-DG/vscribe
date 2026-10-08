@@ -235,8 +235,13 @@
   .transcribe-panel form { display: flex; flex-direction: column; gap: 14px; }
   .transcribe-panel input[type="url"] {
     background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
-    border-radius: 8px; padding: 12px 14px; font-size: 14px;
+    border-radius: 8px; padding: 12px 14px; font-size: 14px; width: 100%;
   }
+  .transcribe-panel input[type="file"] {
+    display: block; margin-top: 6px; width: 100%; color: var(--text-muted);
+    font-size: 13px;
+  }
+  .file-picker { font-size: 13px; color: var(--text-muted); }
   .format-toggle { display: flex; gap: 18px; font-size: 13px; color: var(--text-muted); }
   .format-toggle label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 
@@ -302,8 +307,8 @@
   <section id="authView" class="auth-view">
     <div class="auth-card">
       <span class="wave-mark large idle" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-      <h1>Turn any link into text</h1>
-      <p class="sub">Paste a video URL, get a transcript.</p>
+      <h1>Turn media into text</h1>
+      <p class="sub">Paste a video URL or upload an audio/video file.</p>
 
       <div class="tabs">
         <button class="tab active" data-tab="login">Log in</button>
@@ -374,7 +379,17 @@
       <div class="transcribe-panel card">
         <h2>New transcription</h2>
         <form id="transcribeForm">
-          <input type="url" id="urlInput" placeholder="Paste a video link…" required>
+          <div class="format-toggle">
+            <label><input type="radio" name="sourceType" value="url" checked> Link</label>
+            <label><input type="radio" name="sourceType" value="upload"> Upload file</label>
+          </div>
+          <div id="urlSource">
+            <input type="url" id="urlInput" placeholder="Paste a video link…" required>
+          </div>
+          <label id="fileSource" class="file-picker hidden">
+            Choose an audio or video file
+            <input type="file" id="mediaFile" accept="audio/*,video/*">
+          </label>
           <div class="format-toggle">
             <label><input type="radio" name="format" value="word_by_word" checked> Text only</label>
             <label><input type="radio" name="format" value="timeline"> Timed (SRT/VTT)</label>
@@ -414,11 +429,13 @@
 <div id="toast" class="toast hidden"></div>
 
 <script>
+  window.VSCRIBE_API_BASE = __API_BASE_URL__;
+</script>
+<script>
 (() => {
   'use strict';
 
   /* ── Config ── */
-  const DEFAULT_API_BASE = 'https://luna.frionode.online/api/v1';
   const LS = {
     theme: 'vscribe_theme',
     apiBase: 'vscribe_api_base',
@@ -427,7 +444,7 @@
   };
 
   const state = {
-    apiBase: localStorage.getItem(LS.apiBase) || DEFAULT_API_BASE,
+    apiBase: localStorage.getItem(LS.apiBase) || window.VSCRIBE_API_BASE || `${location.origin}/api/v1`,
     session: JSON.parse(localStorage.getItem(LS.session) || 'null'), // {email, apiKey, plan, label, lastUsed, createdAt}
     pollTimer: null,
     keyRevealed: false
@@ -477,7 +494,9 @@
 
   /* ── API helper ── */
   async function api(path, { method = 'GET', body, auth = false } = {}) {
-    const headers = { 'Content-Type': 'application/json' };
+    const headers = {};
+    const isFormData = body instanceof FormData;
+    if (!isFormData && body !== undefined) headers['Content-Type'] = 'application/json';
     if (auth) {
       if (!state.session?.apiKey) throw new Error('Not authenticated');
       headers['X-API-Key'] = state.session.apiKey;
@@ -485,7 +504,7 @@
     const res = await fetch(state.apiBase + path, {
       method,
       headers,
-      body: body ? JSON.stringify(body) : undefined
+      body: isFormData ? body : body === undefined ? undefined : JSON.stringify(body)
     });
     let data = {};
     try { data = await res.json(); } catch (_) {}
@@ -687,7 +706,7 @@
   }
   function reopenJob(item) {
     resetResultUI();
-    $('urlInput').value = item.url;
+    $('urlInput').value = item.isUpload ? '' : item.url;
     if (item.status === 'completed') {
       fetchAndRenderResult(item.id, item.format);
     } else {
@@ -703,6 +722,19 @@
   const jobStatus = $('jobStatus');
   const statusText = $('statusText');
   const jobError = $('jobError');
+  const urlInput = $('urlInput');
+  const mediaFile = $('mediaFile');
+
+  function setSourceType(sourceType) {
+    const isUpload = sourceType === 'upload';
+    $('urlSource').classList.toggle('hidden', isUpload);
+    $('fileSource').classList.toggle('hidden', !isUpload);
+    urlInput.required = !isUpload;
+    mediaFile.required = isUpload;
+  }
+  document.querySelectorAll('input[name="sourceType"]').forEach(input => {
+    input.addEventListener('change', () => setSourceType(input.value));
+  });
 
   function resetResultUI() {
     jobError.classList.add('hidden');
@@ -714,15 +746,26 @@
 
   transcribeForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const url = $('urlInput').value.trim();
+    const sourceType = transcribeForm.querySelector('input[name="sourceType"]:checked').value;
+    const isUpload = sourceType === 'upload';
+    const file = mediaFile.files[0];
+    const url = isUpload ? file?.name : urlInput.value.trim();
     const format = transcribeForm.querySelector('input[name="format"]:checked').value;
     resetResultUI();
     submitBtn.disabled = true;
     jobStatus.classList.remove('hidden');
-    statusText.textContent = 'Queuing…';
+    statusText.textContent = isUpload ? 'Uploading…' : 'Queuing…';
     try {
-      const data = await api('/transcribe', { method: 'POST', auth: true, body: { url, format } });
-      addHistory({ id: data.job_id, url, format, status: 'queued', createdAt: Date.now() });
+      const body = isUpload ? new FormData() : { url, format };
+      if (isUpload) {
+        if (!file) throw new Error('Choose an audio or video file to upload');
+        body.append('file', file);
+        body.append('format', format);
+      }
+      const data = await api(isUpload ? '/transcribe/upload' : '/transcribe', {
+        method: 'POST', auth: true, body
+      });
+      addHistory({ id: data.job_id, url: isUpload ? `File: ${file.name}` : url, isUpload, format, status: 'queued', createdAt: Date.now() });
       pollJob(data.job_id, format);
     } catch (err) {
       submitBtn.disabled = false;

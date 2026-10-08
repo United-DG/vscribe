@@ -68,10 +68,9 @@ const api = spawn('pnpm', [
 });
 
 // Frontend
-const frontend = spawn('npx', ['serve', '.', '-l', process.env.FRONTEND_PORT], {
-  cwd: FRONTEND,
+const frontend = spawn(process.execPath, ['scripts/frontend-server.js'], {
+  cwd: ROOT,
   stdio: 'inherit',
-  shell: true,
   env: { ...process.env },
 });
 

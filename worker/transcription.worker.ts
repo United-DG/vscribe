@@ -20,6 +20,7 @@ interface TranscriptionJob {
   source: string;
   format: 'word_by_word' | 'timeline';
   isUrl: boolean;
+  pythonJobId?: string;
   userId?: string;
   webhookUrl?: string;
 }
@@ -57,14 +58,18 @@ const worker = new Worker(
     log.progress(5, 'Starting download...');
 
     try {
-      const response = await axios.post(`${PYTHON_SERVICE}/transcribe`, {
-        url: isUrl ? source : undefined,
-        format,
-        use_cache: true,
-      }, { timeout: 600000 });
-
-      const pythonJobId = response.data.job_id;
-      log.progress(10, 'Submitted to transcriber');
+      let pythonJobId = job.data.pythonJobId;
+      if (!pythonJobId) {
+        const response = await axios.post(`${PYTHON_SERVICE}/transcribe`, {
+          url: isUrl ? source : undefined,
+          format,
+          use_cache: true,
+        }, { timeout: 600000 });
+        pythonJobId = response.data.job_id;
+        log.progress(10, 'Submitted to transcriber');
+      } else {
+        log.progress(10, 'Upload received by transcriber');
+      }
 
       let result = null;
       let attempts = 0;

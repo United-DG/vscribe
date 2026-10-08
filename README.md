@@ -20,6 +20,11 @@ vscribe is a powerful video transcription API that converts speech to text from 
 
 ## 🚀 Quick Start
 
+The dashboard's default API endpoint is configured with `API_BASE_URL` in the
+server environment (see `env.example`). The dashboard's **API endpoint** setting
+can still override that default in the browser. Local audio and video uploads are
+limited to 500 MB by default; configure `MAX_UPLOAD_SIZE_MB` to change the limit.
+
 ```bash
 # Submit a video URL
 curl -X POST https://vscribe.frionode.online/api/v1/transcribe \
@@ -93,6 +98,11 @@ Submit a video URL for transcription.
 | `url` | string | *required* | Video URL (FB, IG, TikTok, YT) |
 | `format` | string | `word_by_word` | `word_by_word` or `timeline` |
 | `use_cache` | boolean | `true` | Skip processing if already transcribed |
+
+#### `POST /api/v1/transcribe/upload`
+Upload a local audio or video file as `multipart/form-data`. Include a `file`
+field and an optional `format` field (`word_by_word` or `timeline`). Uploads are
+limited to 500 MB by default; set `MAX_UPLOAD_SIZE_MB` to change the limit.
 
 #### `GET /api/v1/transcribe/{job_id}`
 Get job status and result.

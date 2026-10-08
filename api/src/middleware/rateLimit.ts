@@ -19,8 +19,8 @@ const SKIP_PATHS = [
 ];
 
 function shouldSkip(req: Request): boolean {
-  // Only count POST /transcribe (job submissions)
-  if (req.method === 'POST' && req.path === '/transcribe') {
+  // Count all transcription submissions, including uploads.
+  if (req.method === 'POST' && (req.path === '/transcribe' || req.path === '/transcribe/upload')) {
     return false; // COUNT IT
   }
   

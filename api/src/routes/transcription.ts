@@ -1,10 +1,43 @@
 import { Router, Request, Response } from 'express';
 import { transcriptionQueue, PRIORITY } from '../config/queue';
 import { randomUUID } from 'crypto';
+import axios from 'axios';
+import FormData from 'form-data';
+import multer from 'multer';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
-const router = Router();
+const router: Router = Router();
 
 const generateJobId = (): string => `txr_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
+const pythonServiceUrl = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
+const maxUploadSizeMb = Number.parseInt(process.env.MAX_UPLOAD_SIZE_MB || '500', 10);
+if (!Number.isSafeInteger(maxUploadSizeMb) || maxUploadSizeMb < 1) {
+  throw new Error('MAX_UPLOAD_SIZE_MB must be a positive integer');
+}
+const mediaExtensions = new Set([
+  '.3g2', '.3gp', '.aac', '.aif', '.aiff', '.alac', '.amr', '.asf', '.au',
+  '.avi', '.caf', '.flac', '.flv', '.m2ts', '.m2v', '.m4a', '.m4b', '.m4p',
+  '.m4v', '.mka', '.mkv', '.mov', '.mp2', '.mp3', '.mp4', '.mpe', '.mpeg',
+  '.mpg', '.mts', '.oga', '.ogg', '.ogv', '.opus', '.ra', '.ram', '.ts',
+  '.wav', '.weba', '.webm', '.wma', '.wmv'
+]);
+const receiveUpload = multer({
+  dest: os.tmpdir(),
+  limits: { fileSize: maxUploadSizeMb * 1024 * 1024 }
+}).single('file');
+
+function handleUpload(req: Request, res: Response, next: (error?: Error) => void) {
+  receiveUpload(req, res, (error) => {
+    if (!error) return next();
+    if (error instanceof multer.MulterError) {
+      const status = error.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(status).json({ error: error.message });
+    }
+    return next(error);
+  });
+}
 
 // POST /api/v1/transcribe
 router.post('/transcribe', async (req: Request, res: Response) => {
@@ -27,6 +60,69 @@ router.post('/transcribe', async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     return res.status(502).json({ error: 'Queue service error', message: error.message });
+  }
+});
+
+// POST /api/v1/transcribe/upload
+router.post('/transcribe/upload', handleUpload, async (req: Request, res: Response) => {
+  const uploadedFile = req.file;
+  if (!uploadedFile) return res.status(400).json({ error: 'An audio or video file is required' });
+
+  try {
+    const format = req.body.format || 'word_by_word';
+    if (format !== 'word_by_word' && format !== 'timeline') {
+      return res.status(400).json({ error: 'Format must be word_by_word or timeline' });
+    }
+
+    const extension = path.extname(uploadedFile.originalname).toLowerCase();
+    if (!mediaExtensions.has(extension)) {
+      return res.status(400).json({ error: 'Unsupported media file type' });
+    }
+
+    const form = new FormData();
+    const safeFilename = path.basename(uploadedFile.originalname).replace(/[^\w.-]/g, '_') || 'media';
+    form.append('file', fs.createReadStream(uploadedFile.path), safeFilename);
+    form.append('format', format);
+
+    const pythonResponse = await axios.post(`${pythonServiceUrl}/transcribe/upload`, form, {
+      headers: form.getHeaders(),
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+      timeout: 600000
+    });
+    const pythonJobId = pythonResponse.data.job_id;
+    if (typeof pythonJobId !== 'string' || !pythonJobId) {
+      throw new Error('Transcription service returned an invalid job ID');
+    }
+
+    const priority = req.user?.tier === 'premium' ? PRIORITY.HIGH : PRIORITY.NORMAL;
+    const jobId = generateJobId();
+    const job = await transcriptionQueue.add('transcribe-upload', {
+      source: safeFilename,
+      format,
+      isUrl: false,
+      pythonJobId,
+      userId: req.user?.apiKey
+    }, { priority, jobId });
+
+    return res.status(202).json({
+      message: 'Transcription queued',
+      job_id: job.id,
+      status: 'queued',
+      _links: {
+        status: `/api/v1/transcribe/${job.id}`,
+        result: `/api/v1/transcribe/${job.id}/result`,
+        srt: `/api/v1/transcribe/${job.id}/srt`,
+        vtt: `/api/v1/transcribe/${job.id}/vtt`
+      }
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return res.status(502).json({ error: 'Upload service error', message });
+  } finally {
+    await fs.promises.unlink(uploadedFile.path).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') console.error('Failed to remove temporary upload:', error.message);
+    });
   }
 });
 

@@ -23,6 +23,7 @@ primary_region = 'jnb'
 
 [env]
   PYTHON_SERVICE_URL = "http://localhost:8000"
+  API_BASE_URL = "https://vscribe.frionode.online/api/v1"
   DB_PATH = "/data/transcribe.db"
 
 [[vm]]
