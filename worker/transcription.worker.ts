@@ -117,6 +117,7 @@ const worker = new Worker(
     connection: getRedisConnection(),
     concurrency: 2,
     limiter: { max: 5, duration: 60000 },
+    lockDuration: 300000,
   }
 );
 

@@ -202,9 +202,9 @@ class VideoTranscriber:
             if use_cache:
                 self._save_to_cache(cache_key, result)
             
-            # Cleanup temp audio
+            # Cleanup cache leftovers (if any)
             if is_url and os.path.exists(audio_path):
-                os.remove(audio_path)
+                shutil.rmtree(os.path.dirname(audio_path), ignore_errors=True)
             
             if progress_callback:
                 progress_callback(JobStatus.COMPLETED, 100)
@@ -223,8 +223,11 @@ class VideoTranscriber:
     
     def _download_audio(self, url: str) -> tuple[str, str]:
         """Download audio from video URL"""
-        output_template = os.path.join(self.temp_dir, "%(id)s.%(ext)s")
-        
+        import uuid, shutil
+        job_dir = os.path.join(self.temp_dir, uuid.uuid4().hex)
+        os.makedirs(job_dir, exist_ok=True)
+        output_template = os.path.join(job_dir, "%(id)s.%(ext)s")
+
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': output_template,
@@ -236,13 +239,13 @@ class VideoTranscriber:
             'quiet': True,
             'no_warnings': True,
         }
-        
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             title = info.get('title', 'Unknown')
             video_id = info.get('id', 'unknown')
-        
-        audio_path = os.path.join(self.temp_dir, f"{video_id}.mp3")
+
+        audio_path = os.path.join(job_dir, f"{video_id}.mp3")
         return audio_path, title
     
     def _transcribe_audio(
