@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import { transcriptionRoutes } from './routes/transcription';
+import { translationRoutes } from './routes/translation';
 import { authRoutes } from './routes/auth';
 import { apiKeyMiddleware } from './middleware/apiKey';
 import { rateLimiter } from './middleware/rateLimit';
@@ -20,7 +21,7 @@ app.use(helmet({
 }));
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // Health check rate limiter
 const healthChecks: Record<string, { count: number; resetTime: number }> = {};
@@ -51,7 +52,7 @@ app.get('/health', healthRateLimiter, (_req: Request, res: Response) => {
 app.use('/api/v1', authRoutes);
 
 // Protected routes (API key required)
-app.use('/api/v1', apiKeyMiddleware, rateLimiter, transcriptionRoutes);
+app.use('/api/v1', apiKeyMiddleware, rateLimiter, transcriptionRoutes, translationRoutes);
 
 app.use((_req: Request, res: Response) => res.status(404).json({ error: 'Not found' }));
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
@@ -62,5 +63,6 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 app.listen(PORT, () => {
   console.log(`🚀 API Gateway running on http://localhost:${PORT}`);
   console.log(`📡 Python service: ${process.env.PYTHON_SERVICE_URL}`);
+  console.log(`🌍 Translation service: ${process.env.TRANSLATION_SERVICE_URL || 'http://localhost:8001'}`);
   console.log(`🗄️  Database: SQLite (WAL mode)`);
 });

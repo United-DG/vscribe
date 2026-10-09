@@ -17,7 +17,7 @@ COPY tsconfig.json ./
 
 RUN mkdir -p /app/data
 
-EXPOSE 3000
+EXPOSE 3001
 
 # Use ts-node directly (no build step needed)
 CMD ["pnpm", "exec", "ts-node", "api/src/index.ts"]

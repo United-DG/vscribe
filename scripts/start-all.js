@@ -28,6 +28,19 @@ const python = spawn('python3', ['api/services/server.py'], {
   env: { ...process.env },
 });
 
+// Translation is optional because Argos dependencies and language models are large.
+let translation = null;
+let translationWorker = null;
+if (process.env.TRANSLATION_ENABLED === 'true') {
+  translation = spawn('python3', ['api/services/translation_server.py'], {
+    cwd: ROOT,
+    stdio: 'inherit',
+    env: { ...process.env },
+  });
+} else {
+  console.log('🌍 Translation disabled (set TRANSLATION_ENABLED=true to enable)\n');
+}
+
 // Redis
 let redis = null;
 if (!hasCloudRedis) {
@@ -55,6 +68,19 @@ const worker = spawn('pnpm', [
   env: { ...process.env },
 });
 
+if (process.env.TRANSLATION_ENABLED === 'true') {
+  translationWorker = spawn('pnpm', [
+    'exec',
+    'ts-node',
+    'worker/translation.worker.ts',
+  ], {
+    cwd: ROOT,
+    stdio: 'inherit',
+    shell: true,
+    env: { ...process.env },
+  });
+}
+
 // API
 const api = spawn('pnpm', [
   'exec',
@@ -81,8 +107,10 @@ function shutdown() {
   console.log('\n🛑 Shutting down...');
 
   if (python.pid) process.kill(-python.pid, 'SIGTERM');
+  if (translation?.pid) process.kill(-translation.pid, 'SIGTERM');
   if (redis && redis.pid) process.kill(-redis.pid, 'SIGTERM');
   if (worker.pid) process.kill(-worker.pid, 'SIGTERM');
+  if (translationWorker?.pid) process.kill(-translationWorker.pid, 'SIGTERM');
   if (api.pid) process.kill(-api.pid, 'SIGTERM');
   if (frontend.pid) process.kill(-frontend.pid, 'SIGTERM');
 
@@ -92,12 +120,20 @@ function shutdown() {
       try { process.kill(-python.pid, 'SIGKILL'); } catch (e) {}
     }
 
+    if (translation?.pid) {
+      try { process.kill(-translation.pid, 'SIGKILL'); } catch (e) {}
+    }
+
     if (redis && redis.pid) {
       try { process.kill(-redis.pid, 'SIGKILL'); } catch (e) {}
     }
 
     if (worker.pid) {
       try { process.kill(-worker.pid, 'SIGKILL'); } catch (e) {}
+    }
+
+    if (translationWorker?.pid) {
+      try { process.kill(-translationWorker.pid, 'SIGKILL'); } catch (e) {}
     }
 
     if (api.pid) {

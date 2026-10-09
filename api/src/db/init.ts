@@ -7,7 +7,7 @@ const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', '..', '..', 'd
 const dbDir = path.dirname(DB_PATH);
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 
-const db = new Database(DB_PATH);
+const db: Database.Database = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 db.pragma('busy_timeout = 5000');

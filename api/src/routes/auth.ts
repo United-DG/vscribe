@@ -12,7 +12,7 @@ import {
 } from '../services/mailer';
 import { apiKeyMiddleware } from '../middleware/apiKey';
 
-const router = Router();
+const router: Router = Router();
 
 // ── PUBLIC ROUTES (no API key needed) ────
 
