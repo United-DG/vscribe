@@ -262,10 +262,6 @@
   .segment-row:last-child { border-bottom: none; }
   .segment-time { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); flex-shrink: 0; padding-top: 1px; }
   .result-actions { display: flex; gap: 8px; margin: 0 0 14px; align-items: center; flex-wrap: wrap; }
-  .translate-language {
-    background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
-    border-radius: 8px; padding: 7px 10px; min-width: 180px; font-size: 13px;
-  }
   .translation-status { font-size: 12px; color: var(--text-muted); margin: 0 0 12px; }
   .translation-panel { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
   .translation-panel h3 { font-size: 13px; margin: 0 0 10px; color: var(--accent); }
@@ -418,9 +414,7 @@
             <button id="downloadTxt" class="btn-secondary small hidden">Download .txt</button>
             <button id="downloadSrt" class="btn-secondary small hidden">Download .srt</button>
             <button id="downloadVtt" class="btn-secondary small hidden">Download .vtt</button>
-            <input id="translateLanguage" class="translate-language" type="search" list="translationLanguages" placeholder="Search target language" aria-label="Target language" disabled>
-            <datalist id="translationLanguages"></datalist>
-            <button id="translateResult" class="btn-secondary small" disabled>Translate</button>
+            <button id="translateResult" class="btn-secondary small" disabled>Translate to English</button>
             <button id="copyTranslation" class="btn-secondary small hidden">Copy translation</button>
             <button id="downloadTranslation" class="btn-secondary small hidden">Download translation</button>
           </div>
@@ -725,6 +719,7 @@
   function reopenJob(item) {
     resetResultUI();
     $('urlInput').value = item.isUpload ? '' : item.url;
+    currentMediaSource = item.isUpload ? null : { url: item.url };
     if (item.status === 'completed') {
       fetchAndRenderResult(item.id, item.format);
     } else {
@@ -742,13 +737,11 @@
   const jobError = $('jobError');
   const urlInput = $('urlInput');
   const mediaFile = $('mediaFile');
-  const translationLanguage = $('translateLanguage');
   const translateButton = $('translateResult');
-  let translationLanguages = [];
   let translatedResult = null;
   let translationJobTimer = null;
-  let translationLanguageTimer = null;
   let translationBusy = false;
+  let currentMediaSource = null;
 
   function setSourceType(sourceType) {
     const isUpload = sourceType === 'upload';
@@ -770,14 +763,10 @@
     $('translationPanel').classList.add('hidden');
     $('translationStatus').classList.add('hidden');
     ['translatedText', 'translatedSegments', 'copyTranslation', 'downloadTranslation'].forEach(id => $(id).classList.add('hidden'));
-    translationLanguage.value = '';
-    translationLanguage.disabled = true;
     translateButton.disabled = true;
-    translationLanguages = [];
     translatedResult = null;
     translationBusy = false;
     clearTimeout(translationJobTimer);
-    clearTimeout(translationLanguageTimer);
   }
 
   transcribeForm.addEventListener('submit', async (e) => {
@@ -788,6 +777,7 @@
     const url = isUpload ? file?.name : urlInput.value.trim();
     const format = transcribeForm.querySelector('input[name="format"]:checked').value;
     resetResultUI();
+    currentMediaSource = isUpload ? { file } : { url };
     submitBtn.disabled = true;
     jobStatus.classList.remove('hidden');
     statusText.textContent = isUpload ? 'Uploading…' : 'Queuing…';
@@ -881,35 +871,11 @@
       $('downloadSrt').classList.remove('hidden');
       $('downloadVtt').classList.remove('hidden');
     }
-    loadTranslationLanguages(result.language);
-  }
-
-  async function loadTranslationLanguages(sourceLanguage) {
-    clearTimeout(translationLanguageTimer);
-    const resultJobId = currentResult?.jobId;
-    if (!sourceLanguage || sourceLanguage === 'unknown') {
-      setTranslationStatus('The transcription did not identify a source language.');
-      return;
-    }
-    try {
-      const data = await api(`/translations/languages?source=${encodeURIComponent(sourceLanguage)}`, { auth: true });
-      if (currentResult?.jobId !== resultJobId) return;
-      clearTimeout(translationLanguageTimer);
-      translationLanguages = data.languages || [];
-      const options = $('translationLanguages');
-      options.replaceChildren(...translationLanguages.map(language => {
-        const option = document.createElement('option');
-        option.value = `${language.name} (${language.code})`;
-        return option;
-      }));
-      translationLanguage.disabled = translationLanguages.length === 0;
-      translateButton.disabled = !selectedTargetLanguage();
-      if (!translationLanguages.length) setTranslationStatus('No translation targets are installed for this source language.');
-      else $('translationStatus').classList.add('hidden');
-    } catch (err) {
-      if (currentResult?.jobId !== resultJobId) return;
-      setTranslationStatus(`Translation service unavailable. Retrying shortly. (${err.message})`);
-      translationLanguageTimer = setTimeout(() => loadTranslationLanguages(sourceLanguage), 30000);
+    translateButton.disabled = !currentMediaSource || translationBusy;
+    if (!currentMediaSource) {
+      setTranslationStatus('To translate an uploaded file, select the file and transcribe it again.');
+    } else {
+      $('translationStatus').classList.add('hidden');
     }
   }
 
@@ -919,52 +885,37 @@
     status.classList.remove('hidden');
   }
 
-  function selectedTargetLanguage() {
-    const selected = translationLanguage.value.trim();
-    const match = translationLanguages.find(language => selected === `${language.name} (${language.code})`);
-    return match?.code || '';
-  }
-
-  translationLanguage.addEventListener('input', () => {
-    translateButton.disabled = translationBusy || !selectedTargetLanguage();
-  });
-
   translateButton.addEventListener('click', async () => {
-    if (!currentResult) return;
-    const target = selectedTargetLanguage();
-    if (!target) {
-      setTranslationStatus('Choose a target language from the suggestions.');
-      return;
-    }
+    if (!currentResult || !currentMediaSource) return;
     translationBusy = true;
     translateButton.disabled = true;
     $('translationPanel').classList.add('hidden');
     $('copyTranslation').classList.add('hidden');
     $('downloadTranslation').classList.add('hidden');
     translatedResult = null;
-    setTranslationStatus('Queuing translation…');
+    setTranslationStatus('Submitting audio for English translation…');
     try {
-      const { result, format } = currentResult;
+      let body;
+      if (currentMediaSource.file) {
+        body = new FormData();
+        body.append('file', currentMediaSource.file);
+      } else {
+        body = { url: currentMediaSource.url };
+      }
       const data = await api('/translations', {
         method: 'POST',
         auth: true,
-        body: {
-          target,
-          format,
-          language: result.language,
-          full_text: result.full_text,
-          segments: result.segments
-        }
+        body
       });
-      pollTranslation(data.job_id, target);
+      pollTranslation(data.job_id);
     } catch (err) {
       setTranslationStatus('Translation service unavailable. Please try again later.');
       translationBusy = false;
-      translateButton.disabled = !selectedTargetLanguage();
+      translateButton.disabled = !currentMediaSource;
     }
   });
 
-  function pollTranslation(jobId, target) {
+  function pollTranslation(jobId) {
     clearTimeout(translationJobTimer);
     const resultJobId = currentResult?.jobId;
     const tick = async () => {
@@ -973,13 +924,13 @@
         if (currentResult?.jobId !== resultJobId) return;
         if (data.status === 'completed') {
           translatedResult = data.result;
-          renderTranslation(data.result, target);
+          renderTranslation(data.result);
           translationBusy = false;
-          translateButton.disabled = !selectedTargetLanguage();
+          translateButton.disabled = !currentMediaSource;
         } else if (data.status === 'failed') {
           setTranslationStatus('Translation service unavailable. Please try again later.');
           translationBusy = false;
-          translateButton.disabled = !selectedTargetLanguage();
+          translateButton.disabled = !currentMediaSource;
         } else {
           const progress = typeof data.progress === 'number' ? `${data.progress}%` : '';
           setTranslationStatus(`Translating… ${progress}`);
@@ -989,15 +940,14 @@
         if (currentResult?.jobId !== resultJobId) return;
         setTranslationStatus(err.message);
         translationBusy = false;
-        translateButton.disabled = !selectedTargetLanguage();
+        translateButton.disabled = !currentMediaSource;
       }
     };
     tick();
   }
 
-  function renderTranslation(result, target) {
-    const targetLanguage = translationLanguages.find(language => language.code === target);
-    $('translationTitle').textContent = `Translation${targetLanguage ? ` · ${targetLanguage.name}` : ''}`;
+  function renderTranslation(result) {
+    $('translationTitle').textContent = 'English translation · generated from the original audio';
     $('translationPanel').classList.remove('hidden');
     $('translationStatus').classList.add('hidden');
     if (currentResult.format === 'word_by_word') {

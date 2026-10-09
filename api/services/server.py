@@ -7,6 +7,7 @@ Run with: uvicorn api.services.server:app --reload --port 8000
 import os
 import sys
 import tempfile
+import logging
 from typing import Optional
 from enum import Enum
 
@@ -28,6 +29,7 @@ app = FastAPI(
     description="Transcribe videos from URLs or file uploads. Returns word-by-word or timeline formats.",
     version="1.0.0"
 )
+logger = logging.getLogger(__name__)
 
 # Allow CORS (for Node.js API and dashboard)
 app.add_middleware(
@@ -236,6 +238,92 @@ async def transcribe_upload(
         job_id=job_id,
         status=JobStatus.DOWNLOADING.value,
         progress=0
+    )
+
+
+@app.post("/translate", response_model=JobStatusResponse)
+async def translate_url(request: TranscribeRequest, background_tasks: BackgroundTasks):
+    """Queue Whisper speech translation into English from a media URL."""
+    import uuid
+
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {
+        "status": JobStatus.DOWNLOADING.value,
+        "progress": 0,
+        "result": None,
+        "error": None,
+    }
+
+    def run_translation():
+        try:
+            jobs[job_id]["status"] = JobStatus.TRANSCRIBING.value
+            jobs[job_id]["progress"] = 10
+            result = transcriber.translate_to_english(str(request.url), is_url=True)
+            jobs[job_id]["status"] = JobStatus.COMPLETED.value
+            jobs[job_id]["progress"] = 100
+            jobs[job_id]["result"] = result
+        except Exception as error:
+            logger.exception("Whisper English translation failed")
+            jobs[job_id]["status"] = JobStatus.FAILED.value
+            jobs[job_id]["error"] = str(error)
+
+    background_tasks.add_task(run_translation)
+    return JobStatusResponse(job_id=job_id, status=JobStatus.DOWNLOADING.value, progress=0)
+
+
+@app.post("/translate/upload", response_model=JobStatusResponse)
+async def translate_upload(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+):
+    """Queue Whisper speech translation into English from an uploaded media file."""
+    import uuid
+
+    suffix = os.path.splitext(file.filename or "")[1]
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+        while chunk := await file.read(1024 * 1024):
+            temp_file.write(chunk)
+        temp_path = temp_file.name
+
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {
+        "status": JobStatus.TRANSCRIBING.value,
+        "progress": 0,
+        "result": None,
+        "error": None,
+        "temp_file": temp_path,
+    }
+
+    def run_translation():
+        try:
+            result = transcriber.translate_to_english(temp_path, is_url=False)
+            jobs[job_id]["status"] = JobStatus.COMPLETED.value
+            jobs[job_id]["progress"] = 100
+            jobs[job_id]["result"] = result
+        except Exception as error:
+            logger.exception("Whisper English translation failed")
+            jobs[job_id]["status"] = JobStatus.FAILED.value
+            jobs[job_id]["error"] = str(error)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    background_tasks.add_task(run_translation)
+    return JobStatusResponse(job_id=job_id, status=JobStatus.TRANSCRIBING.value, progress=0)
+
+
+@app.get("/translate/{job_id}", response_model=JobStatusResponse)
+async def get_translation(job_id: str):
+    """Get Whisper English translation status and result."""
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Translation job not found")
+    return JobStatusResponse(
+        job_id=job_id,
+        status=job["status"],
+        progress=job.get("progress", 0),
+        result=job.get("result"),
+        error=job.get("error"),
     )
 
 

@@ -3,41 +3,14 @@ import { transcriptionQueue, PRIORITY } from '../config/queue';
 import { randomUUID } from 'crypto';
 import axios from 'axios';
 import FormData from 'form-data';
-import multer from 'multer';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
+import { handleUpload, mediaExtensions } from './upload';
 
 const router: Router = Router();
 
 const generateJobId = (): string => `txr_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
 const pythonServiceUrl = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
-const maxUploadSizeMb = Number.parseInt(process.env.MAX_UPLOAD_SIZE_MB || '500', 10);
-if (!Number.isSafeInteger(maxUploadSizeMb) || maxUploadSizeMb < 1) {
-  throw new Error('MAX_UPLOAD_SIZE_MB must be a positive integer');
-}
-const mediaExtensions = new Set([
-  '.3g2', '.3gp', '.aac', '.aif', '.aiff', '.alac', '.amr', '.asf', '.au',
-  '.avi', '.caf', '.flac', '.flv', '.m2ts', '.m2v', '.m4a', '.m4b', '.m4p',
-  '.m4v', '.mka', '.mkv', '.mov', '.mp2', '.mp3', '.mp4', '.mpe', '.mpeg',
-  '.mpg', '.mts', '.oga', '.ogg', '.ogv', '.opus', '.ra', '.ram', '.ts',
-  '.wav', '.weba', '.webm', '.wma', '.wmv'
-]);
-const receiveUpload = multer({
-  dest: os.tmpdir(),
-  limits: { fileSize: maxUploadSizeMb * 1024 * 1024 }
-}).single('file');
-
-function handleUpload(req: Request, res: Response, next: (error?: Error) => void) {
-  receiveUpload(req, res, (error) => {
-    if (!error) return next();
-    if (error instanceof multer.MulterError) {
-      const status = error.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
-      return res.status(status).json({ error: error.message });
-    }
-    return next(error);
-  });
-}
 
 // POST /api/v1/transcribe
 router.post('/transcribe', async (req: Request, res: Response) => {

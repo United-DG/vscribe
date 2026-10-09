@@ -3,7 +3,9 @@ import os
 import time
 import json
 import hashlib
+import shutil
 import tempfile
+import threading
 import yt_dlp
 from pathlib import Path
 from faster_whisper import WhisperModel
@@ -52,6 +54,7 @@ class VideoTranscriber:
     ):
         self.model_size = model_size
         self.model = None
+        self.model_lock = threading.Lock()
         self.temp_dir = tempfile.mkdtemp(prefix="transcribe_")
         
         # Cache settings
@@ -223,7 +226,7 @@ class VideoTranscriber:
     
     def _download_audio(self, url: str) -> tuple[str, str]:
         """Download audio from video URL"""
-        import uuid, shutil
+        import uuid
         job_dir = os.path.join(self.temp_dir, uuid.uuid4().hex)
         os.makedirs(job_dir, exist_ok=True)
         output_template = os.path.join(job_dir, "%(id)s.%(ext)s")
@@ -254,13 +257,53 @@ class VideoTranscriber:
         title: str
     ) -> TranscriptionResult:
         """Run Whisper transcription"""
-        model = self._load_model()
-        segments, info = model.transcribe(audio_path, beam_size=5)
+        with self.model_lock:
+            model = self._load_model()
+            segments, info = model.transcribe(audio_path, beam_size=5)
+            segments = list(segments)
         
         if transcription_type == TranscriptionType.WORD_BY_WORD:
             return self._format_word_by_word(segments, info, title)
         else:
             return self._format_timeline(segments, info, title)
+
+    def translate_to_english(self, source: str, is_url: bool = True) -> dict:
+        """Translate source speech into English using Whisper's audio translation task."""
+        audio_path = None
+        is_temporary = False
+        try:
+            if is_url:
+                audio_path, title = self._download_audio(source)
+                is_temporary = True
+            else:
+                audio_path = source
+                title = os.path.basename(source)
+
+            with self.model_lock:
+                model = self._load_model()
+                segments, info = model.transcribe(audio_path, beam_size=5, task="translate")
+                translated_segments = [
+                    {"start": segment.start, "end": segment.end, "text": segment.text.strip()}
+                    for segment in segments
+                ]
+
+            full_text = " ".join(segment["text"] for segment in translated_segments)
+            srt = self._generate_srt([TimelineSegment(**segment) for segment in translated_segments])
+            vtt = self._generate_vtt([TimelineSegment(**segment) for segment in translated_segments])
+            return {
+                "language": "en",
+                "source_language": info.language,
+                "duration": info.duration,
+                "title": title,
+                "full_text": full_text,
+                "segments": translated_segments,
+                "srt": srt,
+                "vtt": vtt,
+            }
+        finally:
+            if is_temporary and audio_path and os.path.exists(audio_path):
+                import shutil
+                shutil.rmtree(os.path.dirname(audio_path), ignore_errors=True)
     
     def _format_word_by_word(self, segments, info, title) -> TranscriptionResult:
         full_text = " ".join([s.text.strip() for s in segments])
@@ -308,14 +351,14 @@ class VideoTranscriber:
     
     @staticmethod
     def _format_timestamp(seconds: float, vtt: bool = False) -> str:
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        secs = seconds % 60
-        millis = int((secs - int(secs)) * 1000)
+        total_milliseconds = round(seconds * 1000)
+        hours, remainder = divmod(total_milliseconds, 3_600_000)
+        minutes, remainder = divmod(remainder, 60_000)
+        secs, millis = divmod(remainder, 1000)
         
         if vtt:
-            return f"{hours:02d}:{minutes:02d}:{int(secs):02d}.{millis:03d}"
-        return f"{hours:02d}:{minutes:02d}:{int(secs):02d},{millis:03d}"
+            return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
+        return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
     
     def __del__(self):
         """Cleanup temp directory"""

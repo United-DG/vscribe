@@ -2,98 +2,62 @@ import { Worker, Job } from 'bullmq';
 import axios from 'axios';
 import { getRedisConnection } from '../api/src/config/redis';
 
-const TRANSLATION_SERVICE = process.env.TRANSLATION_SERVICE_URL || 'http://localhost:8001';
+const PYTHON_SERVICE = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
 
 interface TranslationJob {
-  format: 'word_by_word' | 'timeline';
-  sourceLanguage: string;
-  targetLanguage: string;
-  fullText?: string;
-  segments?: Array<{ start: number; end: number; text: string }>;
-  userId?: string;
-}
-
-function splitText(text: string, maxCharacters = 1200): string[] {
-  const sentences = text.match(/[^.!?]+(?:[.!?]+|$)/g) || [text];
-  const chunks: string[] = [];
-  let chunk = '';
-
-  for (const sentence of sentences) {
-    if (sentence.length > maxCharacters) {
-      if (chunk) chunks.push(chunk);
-      chunk = '';
-      const words = sentence.split(/(\s+)/);
-      for (const word of words) {
-        if (chunk.length + word.length > maxCharacters && chunk) {
-          chunks.push(chunk);
-          chunk = '';
-        }
-        chunk += word;
-      }
-    } else if (chunk.length + sentence.length > maxCharacters && chunk) {
-      chunks.push(chunk);
-      chunk = sentence;
-    } else {
-      chunk += sentence;
-    }
-  }
-  if (chunk) chunks.push(chunk);
-  return chunks.filter((value) => value.trim().length > 0);
-}
-
-async function translateBatch(texts: string[], source: string, target: string): Promise<string[]> {
-  const response = await axios.post(`${TRANSLATION_SERVICE}/translate`, {
-    source,
-    target,
-    texts
-  }, { timeout: 600000 });
-  if (!Array.isArray(response.data.translations) || response.data.translations.length !== texts.length) {
-    throw new Error('Translation service returned an invalid response');
-  }
-  return response.data.translations;
+  source: string;
+  pythonJobId?: string;
+  userId: string;
 }
 
 const worker = new Worker<TranslationJob>(
   'translation',
   async (job: Job<TranslationJob>) => {
-    const { format, sourceLanguage, targetLanguage } = job.data;
-    await job.updateProgress(2);
+    let pythonJobId = job.data.pythonJobId;
+    await job.updateProgress(5);
 
-    if (format === 'word_by_word') {
-      const chunks = splitText(job.data.fullText || '');
-      const translated: string[] = [];
-      for (let i = 0; i < chunks.length; i += 12) {
-        const batch = chunks.slice(i, i + 12);
-        translated.push(...await translateBatch(batch, sourceLanguage, targetLanguage));
-        await job.updateProgress(Math.min(99, Math.round(((i + batch.length) / chunks.length) * 100)));
+    if (!pythonJobId) {
+      const response = await axios.post(`${PYTHON_SERVICE}/translate`, {
+        url: job.data.source,
+        format: 'word_by_word',
+      }, { timeout: 600000 });
+      pythonJobId = response.data.job_id;
+      if (typeof pythonJobId !== 'string' || !pythonJobId) {
+        throw new Error('Transcription service returned an invalid translation job ID');
       }
-      return {
-        language: targetLanguage,
-        full_text: translated.join('')
-      };
+      await job.updateData({ ...job.data, pythonJobId });
     }
 
-    const segments = job.data.segments || [];
-    const translatedSegments: Array<{ start: number; end: number; text: string }> = [];
-    for (let i = 0; i < segments.length; i += 12) {
-      const batch = segments.slice(i, i + 12);
-      const translations = await translateBatch(batch.map((segment) => segment.text), sourceLanguage, targetLanguage);
-      translatedSegments.push(...batch.map((segment, index) => ({ ...segment, text: translations[index] })));
-      await job.updateProgress(Math.min(99, Math.round(((i + batch.length) / segments.length) * 100)));
+    for (let attempt = 0; attempt < 1800; attempt++) {
+      const response = await axios.get(`${PYTHON_SERVICE}/translate/${pythonJobId}`, {
+        timeout: 30000
+      });
+      const data = response.data;
+
+      if (data.status === 'completed') {
+        await job.updateProgress(100);
+        return data.result;
+      }
+      if (data.status === 'failed') {
+        throw new Error(data.error || 'Whisper translation failed');
+      }
+
+      await job.updateProgress(Math.min(95, Math.max(5, data.progress || 5)));
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
 
-    return { language: targetLanguage, segments: translatedSegments };
+    throw new Error('Whisper translation timed out');
   },
   {
     connection: getRedisConnection(),
-    concurrency: Number.parseInt(process.env.TRANSLATION_CONCURRENCY || '1', 10),
+    concurrency: 1,
     lockDuration: 900000,
   }
 );
 
-worker.on('completed', (job) => console.log(`✅ Translation ${job.id}: completed`));
-worker.on('failed', (job, error) => console.error(`❌ Translation ${job?.id}: ${error.message}`));
+worker.on('completed', (job) => console.log(`✅ English translation ${job.id}: completed`));
+worker.on('failed', (job, error) => console.error(`❌ English translation ${job?.id}: ${error.message}`));
 
-console.log('🌍 Translation worker started');
+console.log('🌍 Whisper English translation worker started');
 
 export { worker };

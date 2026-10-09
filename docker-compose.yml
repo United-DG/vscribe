@@ -1,6 +1,6 @@
 
 services:
-  # Python transcription service
+  # Python service for transcription and Whisper speech-to-English translation
   transcriber:
     build:
       context: .
@@ -20,24 +20,6 @@ services:
       timeout: 10s
       retries: 3
 
-  # Self-hosted Argos translation service; models are downloaded on first start.
-  translator:
-    profiles: ["translation"]
-    build:
-      context: .
-      dockerfile: Dockerfile.translation
-    volumes:
-      - argos_models:/root/.local/share/argos-translate
-    environment:
-      - TRANSLATION_PORT=8001
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 2h
-
   # Node.js API gateway
   api:
     build:
@@ -50,7 +32,6 @@ services:
     environment:
       - GATEWAY_PORT=3001
       - PYTHON_SERVICE_URL=http://transcriber:8000
-      - TRANSLATION_SERVICE_URL=http://translator:8001
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=node
@@ -74,7 +55,6 @@ services:
       - ./data:/app/data
     environment:
       - PYTHON_SERVICE_URL=http://transcriber:8000
-      - TRANSLATION_SERVICE_URL=http://translator:8001
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=node
@@ -86,21 +66,20 @@ services:
         condition: service_started
     restart: unless-stopped
 
-  # Dedicated queue worker keeps Argos model execution isolated from transcription.
+  # Dedicated queue worker runs Whisper's audio-to-English translation task.
   translation-worker:
-    profiles: ["translation"]
     build:
       context: .
       dockerfile: Dockerfile.node
     command: pnpm exec ts-node worker/translation.worker.ts
     environment:
-      - TRANSLATION_SERVICE_URL=http://translator:8001
+      - PYTHON_SERVICE_URL=http://transcriber:8000
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=node
       - DB_PATH=/app/data/transcribe.db
     depends_on:
-      translator:
+      transcriber:
         condition: service_healthy
       redis:
         condition: service_started
@@ -118,4 +97,3 @@ services:
 
 volumes:
   redis_data:
-  argos_models:

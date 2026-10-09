@@ -63,6 +63,5 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 app.listen(PORT, () => {
   console.log(`🚀 API Gateway running on http://localhost:${PORT}`);
   console.log(`📡 Python service: ${process.env.PYTHON_SERVICE_URL}`);
-  console.log(`🌍 Translation service: ${process.env.TRANSLATION_SERVICE_URL || 'http://localhost:8001'}`);
   console.log(`🗄️  Database: SQLite (WAL mode)`);
 });

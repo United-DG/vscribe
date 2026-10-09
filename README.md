@@ -24,31 +24,12 @@ The dashboard's default API endpoint is configured with `API_BASE_URL` in the
 server environment (see `env.example`). The dashboard's **API endpoint** setting
 can still override that default in the browser. Local audio and video uploads are
 limited to 500 MB by default; configure `MAX_UPLOAD_SIZE_MB` to change the limit.
-Translations use a separate self-hosted Argos Translate service and queue worker.
-The service snapshots the available language-pair model versions on first start
-and persists that snapshot and the models in the `argos_models` volume. Replacing
-that volume creates a new catalog snapshot. This can require substantial disk
-space, bandwidth, memory, and startup time; translation remains local and does
-not send transcript text to a paid provider.
-
-For local non-container startup, install CPU-only PyTorch first, then the
-translation service requirements:
-
-```bash
-python3 -m pip install --index-url https://download.pytorch.org/whl/cpu torch
-python3 -m pip install -r translation-requirements.txt
-```
-
-The Argos model catalog is
-fetched by the translator at first startup; its catalog snapshot and installed
-model set are retained in the persistent volume.
-
-Translation is optional. The normal `docker compose up` stack does not build or
-start the Argos service; enable it explicitly with
-`docker compose --profile translation up`. For local startup, set
-`TRANSLATION_ENABLED=true`. If the translator or its worker is unavailable,
-transcription and the main API still start normally, and the UI reports
-translation as unavailable.
+The dashboard can also ask Faster-Whisper to translate the original speech into
+English. Whisper speech translation only targets English; it is not arbitrary
+text-to-language translation. Translation jobs reuse the existing Python
+transcription service and run in a dedicated queue worker. If that worker is
+unavailable, transcription continues normally and the dashboard reports that
+translation is unavailable.
 
 ```bash
 # Submit a video URL
@@ -129,12 +110,9 @@ Upload a local audio or video file as `multipart/form-data`. Include a `file`
 field and an optional `format` field (`word_by_word` or `timeline`). Uploads are
 limited to 500 MB by default; set `MAX_UPLOAD_SIZE_MB` to change the limit.
 
-#### `GET /api/v1/translations/languages?source={language_code}`
-List installed translation targets for a transcript's source language.
-
 #### `POST /api/v1/translations`
-Queue local translation. Send `target`, `language`, and `format`, plus `full_text`
-for `word_by_word` or timestamped `segments` for `timeline` transcripts. Poll
+Queue Whisper speech translation to English. Send a JSON `url` for an existing
+media URL, or upload the original media again as multipart field `file`. Poll
 `GET /api/v1/translations/{job_id}` for progress and the translated result.
 
 #### `GET /api/v1/transcribe/{job_id}`
