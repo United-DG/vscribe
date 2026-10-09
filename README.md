@@ -30,6 +30,10 @@ text-to-language translation. Translation jobs reuse the existing Python
 transcription service and run in a dedicated queue worker. If that worker is
 unavailable, transcription continues normally and the dashboard reports that
 translation is unavailable.
+Timed transcripts include browser playback of the original media, with
+click-to-seek segments and highlighting during playback. This works for
+uploaded files and media URLs the browser can play directly; some platform
+links must be uploaded to use playback.
 
 ```bash
 # Submit a video URL

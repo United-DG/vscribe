@@ -258,8 +258,17 @@
     background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
     padding: 8px; max-height: 320px; overflow-y: auto;
   }
-  .segment-row { display: flex; gap: 10px; padding: 8px 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .playback-panel { margin-bottom: 14px; }
+  .playback-panel audio, .playback-panel video { display: block; width: 100%; max-height: 360px; border-radius: 8px; background: #000; }
+  .playback-status { font-size: 12px; color: var(--text-muted); margin: 8px 0 0; }
+  .segment-row {
+    display: flex; width: 100%; gap: 10px; padding: 8px 8px;
+    border: 0; border-bottom: 1px solid var(--border); background: transparent;
+    color: var(--text); text-align: left; font-size: 13px; cursor: pointer;
+  }
   .segment-row:last-child { border-bottom: none; }
+  .segment-row:hover, .segment-row.active { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .segment-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .segment-time { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); flex-shrink: 0; padding-top: 1px; }
   .result-actions { display: flex; gap: 8px; margin: 0 0 14px; align-items: center; flex-wrap: wrap; }
   .translation-status { font-size: 12px; color: var(--text-muted); margin: 0 0 12px; }
@@ -419,6 +428,11 @@
             <button id="downloadTranslation" class="btn-secondary small hidden">Download translation</button>
           </div>
           <p id="translationStatus" class="translation-status hidden" role="status"></p>
+          <div id="playbackPanel" class="playback-panel hidden">
+            <video id="videoPlayer" controls preload="metadata" class="hidden" aria-label="Transcription source video"></video>
+            <audio id="audioPlayer" controls preload="metadata" class="hidden" aria-label="Transcription source audio"></audio>
+            <p id="playbackStatus" class="playback-status hidden" role="status"></p>
+          </div>
           <div id="resultText" class="result-text hidden"></div>
           <div id="resultSegments" class="result-segments hidden"></div>
           <div id="translationPanel" class="translation-panel hidden">
@@ -738,10 +752,14 @@
   const urlInput = $('urlInput');
   const mediaFile = $('mediaFile');
   const translateButton = $('translateResult');
+  const audioPlayer = $('audioPlayer');
+  const videoPlayer = $('videoPlayer');
   let translatedResult = null;
   let translationJobTimer = null;
   let translationBusy = false;
   let currentMediaSource = null;
+  let playbackObjectUrl = null;
+  let activeSegmentIndex = -1;
 
   function setSourceType(sourceType) {
     const isUpload = sourceType === 'upload';
@@ -755,10 +773,12 @@
   });
 
   function resetResultUI() {
+    clearPlaybackSource();
     jobError.classList.add('hidden');
     $('resultPanel').classList.add('hidden');
     $('resultText').classList.add('hidden');
     $('resultSegments').classList.add('hidden');
+    $('playbackPanel').classList.add('hidden');
     ['downloadTxt', 'downloadSrt', 'downloadVtt'].forEach(id => $(id).classList.add('hidden'));
     $('translationPanel').classList.add('hidden');
     $('translationStatus').classList.add('hidden');
@@ -858,16 +878,21 @@
     $('resultMeta').textContent = meta.join(' · ');
 
     if (format === 'word_by_word') {
+      $('playbackPanel').classList.add('hidden');
       const box = $('resultText');
       box.textContent = result.full_text || '';
       box.classList.remove('hidden');
       $('downloadTxt').classList.remove('hidden');
     } else {
+      renderPlayback();
       const box = $('resultSegments');
-      box.innerHTML = (result.segments || []).map(s =>
-        `<div class="segment-row"><span class="segment-time">${fmtTime(s.start)}</span><span>${escapeHtml(s.text)}</span></div>`
+      box.innerHTML = (result.segments || []).map((segment, index) =>
+        `<button class="segment-row" type="button" data-segment-index="${index}" aria-pressed="false"><span class="segment-time">${fmtTime(segment.start)}</span><span>${escapeHtml(segment.text)}</span></button>`
       ).join('');
       box.classList.remove('hidden');
+      box.querySelectorAll('.segment-row').forEach((segmentButton) => {
+        segmentButton.addEventListener('click', () => seekToSegment(Number(segmentButton.dataset.segmentIndex)));
+      });
       $('downloadSrt').classList.remove('hidden');
       $('downloadVtt').classList.remove('hidden');
     }
@@ -877,6 +902,82 @@
     } else {
       $('translationStatus').classList.add('hidden');
     }
+  }
+
+  function clearPlaybackSource() {
+    for (const player of [audioPlayer, videoPlayer]) {
+      player.pause();
+      player.onerror = null;
+      player.onloadedmetadata = null;
+      player.ontimeupdate = null;
+      player.removeAttribute('src');
+      player.load();
+      player.classList.add('hidden');
+    }
+    if (playbackObjectUrl) {
+      URL.revokeObjectURL(playbackObjectUrl);
+      playbackObjectUrl = null;
+    }
+    activeSegmentIndex = -1;
+  }
+
+  function renderPlayback() {
+    clearPlaybackSource();
+    const panel = $('playbackPanel');
+    const status = $('playbackStatus');
+    status.classList.add('hidden');
+    if (!currentMediaSource) {
+      panel.classList.remove('hidden');
+      status.textContent = 'Select the original media and transcribe it again to play along with this transcript.';
+      status.classList.remove('hidden');
+      return;
+    }
+
+    const file = currentMediaSource.file;
+    const source = file ? URL.createObjectURL(file) : currentMediaSource.url;
+    if (file) playbackObjectUrl = source;
+
+    const audioExtensions = /\.(aac|aif|aiff|alac|amr|au|caf|flac|m4a|m4b|m4p|mp2|mp3|oga|ogg|opus|ra|ram|wav|weba|wma)(?:$|[?#])/i;
+    const isAudio = file?.type
+      ? file.type.startsWith('audio/')
+      : audioExtensions.test(file ? file.name : currentMediaSource.url);
+    const player = isAudio ? audioPlayer : videoPlayer;
+    player.src = source;
+    player.classList.remove('hidden');
+    panel.classList.remove('hidden');
+    player.onerror = () => {
+      status.textContent = file
+        ? 'This file format cannot be played in your browser.'
+        : 'This link cannot be played directly in your browser. Try uploading the media file instead.';
+      status.classList.remove('hidden');
+    };
+    player.onloadedmetadata = () => status.classList.add('hidden');
+    player.ontimeupdate = updateActiveSegment;
+  }
+
+  function seekToSegment(index) {
+    const segment = currentResult?.result.segments?.[index];
+    if (!segment) return;
+    const player = audioPlayer.classList.contains('hidden') ? videoPlayer : audioPlayer;
+    player.currentTime = segment.start;
+    player.play().catch(() => {
+      $('playbackStatus').textContent = 'Jumped to this segment. Press Play to start the media.';
+      $('playbackStatus').classList.remove('hidden');
+    });
+    updateActiveSegment();
+  }
+
+  function updateActiveSegment() {
+    const player = audioPlayer.classList.contains('hidden') ? videoPlayer : audioPlayer;
+    const segments = currentResult?.format === 'timeline' ? currentResult.result.segments || [] : [];
+    const index = segments.findIndex(segment => player.currentTime >= segment.start && player.currentTime < segment.end);
+    if (index === activeSegmentIndex) return;
+    activeSegmentIndex = index;
+    $('resultSegments').querySelectorAll('.segment-row').forEach((row, rowIndex) => {
+      row.classList.toggle('active', rowIndex === index);
+      row.setAttribute('aria-pressed', String(rowIndex === index));
+      if (rowIndex === index) row.scrollIntoView({ block: 'nearest' });
+    });
   }
 
   function setTranslationStatus(message) {
